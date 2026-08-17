@@ -12,6 +12,8 @@ from pathlib import Path
 
 ADMIN_PORT = int(os.environ.get('ADMIN_PORT', '8080'))
 INPUT_PORT = int(os.environ.get('INPUT_PORT', '8081'))
+ADMIN_PUBLIC_URL = os.environ.get('ADMIN_PUBLIC_URL', '').strip()
+INPUT_PUBLIC_URL = os.environ.get('INPUT_PUBLIC_URL', '').strip()
 DIR = Path(__file__).resolve().parent
 DATA_DIR = DIR / 'data'
 SUBMISSIONS_DIR = DATA_DIR / 'submissions'
@@ -24,6 +26,19 @@ SUBMISSIONS_DIR.mkdir(parents=True, exist_ok=True)
 
 def sanitize_filename(name: str) -> str:
     return re.sub(r'[/\\?%*:|"<>]', '_', name).strip() or 'unknown'
+
+
+def normalize_public_url(raw: str, fallback: str) -> str:
+    url = (raw or '').strip() or fallback
+    return url if url.endswith('/') else url + '/'
+
+
+def admin_public_url() -> str:
+    return normalize_public_url(ADMIN_PUBLIC_URL, f'http://localhost:{ADMIN_PORT}/')
+
+
+def input_public_url() -> str:
+    return normalize_public_url(INPUT_PUBLIC_URL, f'http://localhost:{INPUT_PORT}/')
 
 
 def submission_filename(name: str, year=None, month=None) -> str:
@@ -108,6 +123,8 @@ class BaseHandler(http.server.SimpleHTTPRequestHandler):
             'role': self.role,
             'adminPort': ADMIN_PORT,
             'inputPort': INPUT_PORT,
+            'adminUrl': admin_public_url(),
+            'inputUrl': input_public_url(),
         })
 
     def _handle_get_month_config(self):
@@ -142,7 +159,7 @@ class BaseHandler(http.server.SimpleHTTPRequestHandler):
                 'ok': True,
                 'path': 'data/month-config.json',
                 'indexUpdated': updated_index,
-                'inputUrl': f'http://localhost:{INPUT_PORT}/',
+                'inputUrl': input_public_url(),
             })
         except (json.JSONDecodeError, UnicodeDecodeError):
             self._send_json(400, {'error': 'JSON の形式が不正です'})
@@ -309,8 +326,9 @@ def main():
     input_thread.start()
 
     print(f'シフト入力アプリ起動')
-    print(f'  管理画面（月シフト指定）: http://localhost:{ADMIN_PORT}/')
-    print(f'  入力画面（希望入力）    : http://localhost:{INPUT_PORT}/')
+    print(f'  管理画面（月シフト指定）: {admin_public_url()}')
+    print(f'  入力画面（希望入力）    : {input_public_url()}')
+    print(f'  内部ポート: admin={ADMIN_PORT} / input={INPUT_PORT}')
     print(f'  月設定: {CONFIG_PATH}')
     print(f'  希望JSON保存先: {SUBMISSIONS_DIR}')
     print('終了: Ctrl+C')
