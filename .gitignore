@@ -1,0 +1,13 @@
+.DS_Store
+__pycache__/
+*.pyc
+.pytest_cache/
+.venv/
+venv/
+*.log
+.vscode/
+.idea/
+
+# 個人の希望シフト（送信結果）
+data/submissions/*.json
+!data/submissions/.gitkeep
