@@ -18,6 +18,9 @@ services:
     environment:
       ADMIN_PORT: 8080
       INPUT_PORT: 8081
+      # サブドメイン運用時は公開URLを指定する
+      # ADMIN_PUBLIC_URL: https://admin.example.com/
+      # INPUT_PUBLIC_URL: https://shift.example.com/
     restart: unless-stopped
     healthcheck:
       test: ["CMD", "python3", "-c", "import http.client; http.client.HTTPConnection('localhost', 8080).request('GET', '/api/info'); exit(0)"]

@@ -1,7 +1,7 @@
 import { loadState, saveState } from './storage.js';
 import { renderMonthSpec } from './month-spec.js';
 
-let info = { role: 'admin', adminPort: 8080, inputPort: 8081 };
+let info = { role: 'admin', adminPort: 8080, inputPort: 8081, inputUrl: '' };
 let state = loadState();
 
 function persist() {
@@ -9,6 +9,8 @@ function persist() {
 }
 
 function inputUrl() {
+  const fromServer = (info.inputUrl || '').trim();
+  if (fromServer) return fromServer.endsWith('/') ? fromServer : `${fromServer}/`;
   return `${location.protocol}//${location.hostname}:${info.inputPort}/`;
 }
 
@@ -16,7 +18,7 @@ function renderPortLinks() {
   const el = document.getElementById('port-links');
   if (!el) return;
   const url = inputUrl();
-  el.innerHTML = `入力画面（別ポート）: <a href="${url}" target="shift-input" rel="noopener">${url}</a>`;
+  el.innerHTML = `入力画面: <a href="${url}" target="shift-input" rel="noopener">${url}</a>`;
 }
 
 async function saveMonthConfigToServer() {
