@@ -22,6 +22,8 @@ let app;
 let userName = '';
 /** @type {Record<string, Array<{id: string, windowKey: string, start: string, end: string}>>} */
 let requests = {};
+/** 選択中の日付の編集中データ（「シフト希望を出す」までは未登録） */
+let draftRanges = [];
 let step = 'name';
 let selectedDateKey = null;
 
@@ -30,6 +32,7 @@ export function mountInputApp(container, config) {
   monthConfig = config;
   userName = '';
   requests = {};
+  draftRanges = [];
   step = 'name';
   selectedDateKey = null;
   render();
@@ -55,7 +58,7 @@ function renderNameStep() {
         <button type="button" class="btn btn-primary" id="btn-start">シフト入力を開始</button>
       </div>
       ${hasSlots
-        ? '<p class="note">※ 日付を選び、表示された時間帯の中からご自身の希望時間を指定してください</p>'
+        ? '<p class="note">※ 日付を選び、時間帯を調整してから「シフト希望を出す」を押してください</p>'
         : '<p class="note">この月のシフト枠がまだ設定されていません。管理画面（月シフト指定）で時間帯を設定してください。</p>'}
     </div>
   `;
@@ -65,7 +68,8 @@ function renderNameStep() {
     if (!name) { alert('お名前を入力してください'); return; }
     userName = name;
     step = 'calendar';
-    selectedDateKey = findFirstAvailableDay();
+    selectedDateKey = null;
+    draftRanges = [];
     render();
   };
   document.getElementById('btn-start').addEventListener('click', start);
@@ -95,30 +99,48 @@ function getWindowsForDay(dateKey) {
   return mergeContiguousSlots(monthConfig.days[dateKey] || []);
 }
 
-function getRangesForWindow(dateKey, windowKey) {
-  return (requests[dateKey] || []).filter((r) => r.windowKey === windowKey);
+function getDraftRangesForWindow(windowKey) {
+  return draftRanges.filter((r) => r.windowKey === windowKey);
 }
 
 function newRangeId() {
   return `r${Date.now()}${Math.random().toString(36).slice(2, 6)}`;
 }
 
-/** 日付選択時、未設定のウィンドウには最大時間帯をデフォルトで入れる */
-function ensureDefaultRangesForDay(dateKey) {
-  const windows = getWindowsForDay(dateKey);
-  if (windows.length === 0) return;
-  if (!requests[dateKey]) requests[dateKey] = [];
+function cloneRanges(arr) {
+  return (arr || []).map((r) => ({
+    id: r.id,
+    windowKey: r.windowKey,
+    start: r.start,
+    end: r.end,
+  }));
+}
 
-  for (const window of windows) {
-    if (getRangesForWindow(dateKey, window.key).length === 0) {
-      requests[dateKey].push({
-        id: newRangeId(),
-        windowKey: window.key,
-        start: window.start,
-        end: window.end,
-      });
-    }
+/** 日付を開いたときの編集用データ。確定済みがあればそれを、なければ未登録の下書き。 */
+function loadDraftForDay(dateKey) {
+  const existing = requests[dateKey];
+  if (existing && existing.length > 0) {
+    draftRanges = cloneRanges(existing);
+    return;
   }
+  const windows = getWindowsForDay(dateKey);
+  draftRanges = windows.map((window) => ({
+    id: newRangeId(),
+    windowKey: window.key,
+    start: window.start,
+    end: window.end,
+  }));
+}
+
+function isMobileLayout() {
+  return window.matchMedia('(max-width: 900px)').matches;
+}
+
+function scrollDayPanelIntoView() {
+  if (!isMobileLayout()) return;
+  const panel = document.getElementById('day-panel');
+  if (!panel) return;
+  panel.scrollIntoView({ behavior: 'smooth', block: 'nearest' });
 }
 
 function buildHourLabels(windowStart, windowEnd) {
@@ -191,15 +213,15 @@ function renderInputStep() {
     let statusHtml = !hasSlots
       ? '<span class="day-status none">募集なし</span>'
       : selectedCount > 0
-        ? `<span class="day-status picked">${selectedCount}件選択</span>`
-        : '<span class="day-status open">選択可</span>';
+        ? `<span class="day-status picked">${selectedCount}件登録</span>`
+        : dk === selectedDateKey
+          ? '<span class="day-status editing">編集中</span>'
+          : '<span class="day-status open">選択可</span>';
 
     const classes = ['cal-cell', wd === 0 ? 'sun' : '', wd === 6 ? 'sat' : '', hasSlots ? 'has-slots' : 'no-slots', dk === selectedDateKey ? 'active' : ''].filter(Boolean).join(' ');
     calHtml += `<button type="button" class="${classes}" data-date="${dk}" ${hasSlots ? '' : 'disabled'}><div class="cal-day-num">${d}</div>${statusHtml}</button>`;
   }
   calHtml += '</div>';
-
-  if (selectedDateKey) ensureDefaultRangesForDay(selectedDateKey);
 
   app.innerHTML = `
     <div class="input-container">
@@ -209,7 +231,7 @@ function renderInputStep() {
         <button type="button" class="btn btn-ghost btn-sm" id="btn-back">名前を変更</button>
       </header>
       <div class="summary-bar">
-        <span>選択中: <strong id="selected-count">${countSelected()}</strong> 件</span>
+        <span>登録中: <strong id="selected-count">${countSelected()}</strong> 件</span>
         <button type="button" class="btn btn-primary" id="btn-submit">希望を送信</button>
       </div>
       <div class="input-layout">
@@ -223,12 +245,18 @@ function renderInputStep() {
   app.querySelectorAll('.cal-cell.has-slots').forEach((btn) => {
     btn.addEventListener('click', () => {
       selectedDateKey = btn.dataset.date;
-      ensureDefaultRangesForDay(selectedDateKey);
+      loadDraftForDay(selectedDateKey);
       renderInputStep();
+      scrollDayPanelIntoView();
     });
   });
   bindDayPanelEvents();
-  document.getElementById('btn-back').addEventListener('click', () => { step = 'name'; selectedDateKey = null; render(); });
+  document.getElementById('btn-back').addEventListener('click', () => {
+    step = 'name';
+    selectedDateKey = null;
+    draftRanges = [];
+    render();
+  });
   document.getElementById('btn-submit').addEventListener('click', submitRequests);
 }
 
@@ -246,7 +274,7 @@ function renderDayPanel() {
   }
 
   const windowHtml = windows.map((window) => {
-    const ranges = getRangesForWindow(selectedDateKey, window.key);
+    const ranges = getDraftRangesForWindow(window.key);
     const rangesHtml = ranges.length
       ? ranges.map((r) => `
           <div class="range-block" data-range-id="${r.id}">
@@ -256,7 +284,7 @@ function renderDayPanel() {
             </div>
             ${renderTimeBar(window, r, r.id)}
           </div>`).join('')
-      : '';
+      : '<p class="muted">まだ時間帯がありません。「時間帯を追加」で指定してください。</p>';
 
     return `
       <div class="window-block" data-window="${window.key}">
@@ -268,25 +296,34 @@ function renderDayPanel() {
       </div>`;
   }).join('');
 
+  const alreadyRegistered = (requests[selectedDateKey] || []).length > 0;
+  const confirmLabel = alreadyRegistered ? 'シフト希望を更新する' : 'シフト希望を出す';
+
   return `
     <h2 class="section-title">${Number(m)}月${Number(d)}日（${wd}）</h2>
+    <p class="panel-hint">時間を調整したあと、「${confirmLabel}」を押すとこの日の希望として登録されます。日付を選んだだけでは登録されません。</p>
+    <div class="window-list">${windowHtml}</div>
+    <div class="day-confirm">
+      <button type="button" class="btn btn-primary" id="btn-confirm-day">${confirmLabel}</button>
+    </div>
     <div class="day-panel-actions">
       <button type="button" class="btn btn-secondary btn-sm" id="btn-copy-weekday">この曜日の設定を同じ曜日にコピー</button>
-    </div>
-    <p class="panel-hint">30分刻みのバーで希望時間を調整できます。飛び時間は「時間帯を追加」で入力してください。</p>
-    <div class="window-list">${windowHtml}</div>`;
+    </div>`;
 }
 
 function copyWeekdayToSameDays(sourceDateKey) {
   const { year, month } = monthConfig;
   const [sy, sm, sd] = sourceDateKey.split('-').map(Number);
   const targetWd = getWeekday(sy, sm, sd);
-  const sourceRanges = requests[sourceDateKey] || [];
+  const sourceRanges = draftRanges.length > 0 ? draftRanges : (requests[sourceDateKey] || []);
 
   if (sourceRanges.length === 0) {
     alert('この日にはコピーする設定がありません。');
     return;
   }
+
+  requests[sourceDateKey] = cloneRanges(sourceRanges);
+  draftRanges = cloneRanges(sourceRanges);
 
   const days = getDaysInMonth(year, month);
   let count = 0;
@@ -318,7 +355,7 @@ function copyWeekdayToSameDays(sourceDateKey) {
     return;
   }
 
-  alert(`${WEEKDAYS[targetWd]}曜日の設定を他 ${count} 日分にコピーしました。`);
+  alert(`${WEEKDAYS[targetWd]}曜日の希望を他 ${count} 日分に登録しました。`);
   renderInputStep();
 }
 
@@ -331,13 +368,17 @@ function bindDayPanelEvents() {
     copyBtn.addEventListener('click', () => copyWeekdayToSameDays(selectedDateKey));
   }
 
+  const confirmBtn = panel.querySelector('#btn-confirm-day');
+  if (confirmBtn) {
+    confirmBtn.addEventListener('click', confirmDayRequest);
+  }
+
   panel.querySelectorAll('.btn-add-range').forEach((btn) => {
     btn.addEventListener('click', () => {
       const windowKey = btn.dataset.window;
       const window = getWindowsForDay(selectedDateKey).find((w) => w.key === windowKey);
       if (!window) return;
-      if (!requests[selectedDateKey]) requests[selectedDateKey] = [];
-      const existing = getRangesForWindow(selectedDateKey, windowKey);
+      const existing = getDraftRangesForWindow(windowKey);
       let start = window.start;
       let end = window.end;
       if (existing.length > 0) {
@@ -351,7 +392,7 @@ function bindDayPanelEvents() {
         }
       }
       if (timeToMinutes(start) >= timeToMinutes(end)) return;
-      requests[selectedDateKey].push({ id: newRangeId(), windowKey, start, end });
+      draftRanges.push({ id: newRangeId(), windowKey, start, end });
       refreshDayUI();
     });
   });
@@ -359,15 +400,14 @@ function bindDayPanelEvents() {
   panel.querySelectorAll('.btn-remove-range').forEach((btn) => {
     btn.addEventListener('click', () => {
       const id = btn.dataset.id;
-      requests[selectedDateKey] = (requests[selectedDateKey] || []).filter((r) => r.id !== id);
-      if (requests[selectedDateKey].length === 0) delete requests[selectedDateKey];
+      draftRanges = draftRanges.filter((r) => r.id !== id);
       refreshDayUI();
     });
   });
 
   panel.querySelectorAll('.time-bar-wrap').forEach((wrap) => {
     const rangeId = wrap.dataset.rangeId;
-    const range = (requests[selectedDateKey] || []).find((r) => r.id === rangeId);
+    const range = draftRanges.find((r) => r.id === rangeId);
     if (!range) return;
     const window = getWindowsForDay(selectedDateKey).find((w) => w.key === range.windowKey);
     if (!window) return;
@@ -385,12 +425,22 @@ function bindDayPanelEvents() {
       wrap.querySelector('.bar-start-label').textContent = range.start;
       wrap.querySelector('.bar-end-label').textContent = range.end;
       updateBarVisual(wrap, window, range);
-      refreshSummaryUI();
     };
 
     startInput.addEventListener('input', updateFromSliders);
     endInput.addEventListener('input', updateFromSliders);
   });
+}
+
+function confirmDayRequest() {
+  if (!selectedDateKey) return;
+  if (draftRanges.length === 0) {
+    delete requests[selectedDateKey];
+    alert('時間帯がないため、この日の希望は登録されていません。');
+  } else {
+    requests[selectedDateKey] = cloneRanges(draftRanges);
+  }
+  refreshDayUI();
 }
 
 function updateBarVisual(wrap, window, range) {
@@ -420,7 +470,8 @@ function refreshSummaryUI() {
     const n = (requests[dk] || []).length;
     const statusEl = btn.querySelector('.day-status');
     if (!statusEl) return;
-    if (n > 0) { statusEl.className = 'day-status picked'; statusEl.textContent = `${n}件選択`; }
+    if (n > 0) { statusEl.className = 'day-status picked'; statusEl.textContent = `${n}件登録`; }
+    else if (dk === selectedDateKey) { statusEl.className = 'day-status editing'; statusEl.textContent = '編集中'; }
     else { statusEl.className = 'day-status open'; statusEl.textContent = '選択可'; }
   });
 }
@@ -435,9 +486,9 @@ function renderSelectionSummary() {
     }
   }
   if (entries.length === 0) {
-    return '<h2 class="section-title">選択した希望</h2><p class="muted">まだ選択されていません</p>';
+    return '<h2 class="section-title">登録した希望</h2><p class="muted">まだ登録されていません。日付を選び「シフト希望を出す」で登録してください。</p>';
   }
-  return `<h2 class="section-title">選択した希望（${entries.length}件）</h2><ul class="summary-list">${entries.map((e) => `<li>${escapeHtml(e)}</li>`).join('')}</ul>`;
+  return `<h2 class="section-title">登録した希望（${entries.length}件）</h2><ul class="summary-list">${entries.map((e) => `<li>${escapeHtml(e)}</li>`).join('')}</ul>`;
 }
 
 async function submitRequests() {
