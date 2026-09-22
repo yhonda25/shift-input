@@ -102,6 +102,14 @@ body {
 
 .btn-sm { padding: 0.3rem 0.75rem; font-size: 0.8rem; }
 
+.btn-secondary {
+  background: #e8eef7;
+  color: #1e3a5f;
+  border: 1px solid var(--border);
+}
+
+.btn-secondary:hover { background: #dbe6f4; }
+
 .summary-bar {
   display: flex;
   flex-wrap: wrap;
@@ -125,13 +133,11 @@ body {
   grid-template-columns: 1.1fr 0.9fr;
   gap: 1rem;
   margin-bottom: 1rem;
+  align-items: start;
 }
 
-@media (max-width: 800px) {
-  .input-layout {
-    grid-template-columns: 1fr;
-  }
-}
+.calendar-wrap { order: 1; }
+.day-panel { order: 2; }
 
 .cal-header {
   display: grid;
@@ -209,6 +215,12 @@ body {
   color: #047857;
 }
 
+.day-status.editing {
+  background: #fff7ed;
+  color: #c2410c;
+  font-weight: 600;
+}
+
 .day-status.picked {
   background: var(--selected);
   color: #1e40af;
@@ -222,6 +234,20 @@ body {
 
 .day-panel {
   min-height: 280px;
+  scroll-margin-top: 0.5rem;
+}
+
+.day-confirm {
+  margin-top: 1.25rem;
+  padding-top: 1rem;
+  border-top: 1px solid var(--border);
+}
+
+.day-confirm .btn {
+  width: 100%;
+  font-size: 1rem;
+  padding: 0.85rem 1rem;
+  font-weight: 700;
 }
 
 .panel-hint {
@@ -231,7 +257,7 @@ body {
 }
 
 .day-panel-actions {
-  margin-bottom: 0.75rem;
+  margin-top: 0.85rem;
 }
 
 .panel-empty {
@@ -377,11 +403,26 @@ body {
   font-size: 0.875rem;
 }
 
+@media (max-width: 900px) {
+  .input-layout {
+    grid-template-columns: 1fr;
+  }
+
+  .day-panel {
+    min-height: unset;
+  }
+
+  .cal-cell { min-height: 48px; padding: 0.2rem; }
+  .cal-day-num { font-size: 0.85rem; }
+  .day-status { font-size: 0.58rem; }
+}
+
 @media (max-width: 600px) {
-  .cal-cell { min-height: 60px; }
+  .cal-cell { min-height: 56px; padding: 0.25rem; }
   .summary-list { columns: 1; }
   .tl-row { grid-template-columns: 60px 1fr; }
   .tl-req { grid-column: 1 / -1; }
+  .input-container { padding: 1rem 0.75rem 4rem; }
 }
 
 /* 時間帯ウィンドウ・バー */
@@ -507,4 +548,26 @@ body {
   border-radius: 6px;
   cursor: pointer;
   font-family: inherit;
+}
+
+@media (max-width: 900px) {
+  .time-bar-controls {
+    flex-direction: column;
+    gap: 0.75rem;
+    width: 100%;
+  }
+
+  .time-bar-controls label {
+    display: grid;
+    grid-template-columns: 3rem minmax(0, 1fr) 3.5rem;
+    width: 100%;
+    max-width: 100%;
+    align-items: center;
+  }
+
+  .time-bar-controls input[type="range"] {
+    width: 100%;
+    min-width: 0;
+    height: 36px;
+  }
 }
