@@ -26,6 +26,8 @@ let requests = {};
 let draftRanges = [];
 let step = 'name';
 let selectedDateKey = null;
+/** スマホで日付選択後に月全体を再表示したとき true */
+let calendarExpanded = false;
 
 export function mountInputApp(container, config) {
   app = container;
@@ -35,6 +37,7 @@ export function mountInputApp(container, config) {
   draftRanges = [];
   step = 'name';
   selectedDateKey = null;
+  calendarExpanded = false;
   render();
 }
 
@@ -70,6 +73,7 @@ function renderNameStep() {
     step = 'calendar';
     selectedDateKey = null;
     draftRanges = [];
+    calendarExpanded = false;
     render();
   };
   document.getElementById('btn-start').addEventListener('click', start);
@@ -136,11 +140,98 @@ function isMobileLayout() {
   return window.matchMedia('(max-width: 900px)').matches;
 }
 
-function scrollDayPanelIntoView() {
-  if (!isMobileLayout()) return;
-  const panel = document.getElementById('day-panel');
-  if (!panel) return;
-  panel.scrollIntoView({ behavior: 'smooth', block: 'nearest' });
+function useCompactCalendar() {
+  return isMobileLayout() && !!selectedDateKey && !calendarExpanded;
+}
+
+function getWeekDays(dateKey) {
+  const { year, month } = monthConfig;
+  const day = Number(dateKey.split('-')[2]);
+  const wd = getWeekday(year, month, day);
+  const days = getDaysInMonth(year, month);
+  const cells = [];
+  for (let i = 0; i < 7; i++) {
+    const d = day - wd + i;
+    cells.push(d >= 1 && d <= days ? d : null);
+  }
+  return cells;
+}
+
+function weekRangeLabel(cells) {
+  const nums = cells.filter((d) => d != null);
+  if (nums.length === 0) return '';
+  const { month } = monthConfig;
+  if (nums.length === 1) return `${month}/${nums[0]}`;
+  return `${month}/${nums[0]}〜${month}/${nums[nums.length - 1]}`;
+}
+
+function renderCalCell(d) {
+  if (d == null) return '<div class="cal-cell empty"></div>';
+  const { year, month } = monthConfig;
+  const dk = formatDateKey(year, month, d);
+  const wd = getWeekday(year, month, d);
+  const hasSlots = (monthConfig.days[dk] || []).length > 0;
+  const selectedCount = (requests[dk] || []).length;
+  let statusHtml = !hasSlots
+    ? '<span class="day-status none">募集なし</span>'
+    : selectedCount > 0
+      ? `<span class="day-status picked">${selectedCount}件</span>`
+      : dk === selectedDateKey
+        ? '<span class="day-status editing">編集中</span>'
+        : '<span class="day-status open">選択可</span>';
+  const classes = ['cal-cell', wd === 0 ? 'sun' : '', wd === 6 ? 'sat' : '', hasSlots ? 'has-slots' : 'no-slots', dk === selectedDateKey ? 'active' : ''].filter(Boolean).join(' ');
+  return `<button type="button" class="${classes}" data-date="${dk}" ${hasSlots ? '' : 'disabled'}><div class="cal-day-num">${d}</div>${statusHtml}</button>`;
+}
+
+function renderCalendarHtml() {
+  const compact = useCompactCalendar();
+  const { year, month } = monthConfig;
+  let daysToRender;
+  if (compact) {
+    daysToRender = getWeekDays(selectedDateKey);
+  } else {
+    const firstWd = getWeekday(year, month, 1);
+    const days = getDaysInMonth(year, month);
+    daysToRender = [...Array(firstWd).fill(null), ...Array.from({ length: days }, (_, i) => i + 1)];
+  }
+
+  let html = compact
+    ? `<div class="cal-toolbar">
+        <button type="button" class="btn btn-ghost btn-sm" id="btn-prev-week" aria-label="前の週">‹</button>
+        <span class="cal-toolbar-label">${weekRangeLabel(daysToRender)}</span>
+        <button type="button" class="btn btn-ghost btn-sm" id="btn-next-week" aria-label="次の週">›</button>
+        <button type="button" class="btn btn-secondary btn-sm" id="btn-show-month">月全体</button>
+      </div>`
+    : '<h2 class="section-title cal-month-title">日付を選択</h2>';
+
+  html += '<div class="cal-header">';
+  for (const wd of WEEKDAYS) html += `<div class="cal-wd">${wd}</div>`;
+  html += `</div><div class="cal-grid${compact ? ' week' : ''}">`;
+  html += daysToRender.map(renderCalCell).join('');
+  html += '</div>';
+  return html;
+}
+
+function moveCompactWeek(deltaWeeks) {
+  if (!selectedDateKey) return;
+  const { year, month } = monthConfig;
+  const days = getDaysInMonth(year, month);
+  const day = Number(selectedDateKey.split('-')[2]);
+  const sunday = day - getWeekday(year, month, day) + deltaWeeks * 7;
+  let pick = null;
+  let firstWithSlots = null;
+  for (let i = 0; i < 7; i++) {
+    const d = sunday + i;
+    if (d < 1 || d > days) continue;
+    const dk = formatDateKey(year, month, d);
+    if (pick == null) pick = dk;
+    if ((monthConfig.days[dk] || []).length > 0 && firstWithSlots == null) firstWithSlots = dk;
+  }
+  if (!pick) return;
+  selectedDateKey = firstWithSlots || pick;
+  loadDraftForDay(selectedDateKey);
+  calendarExpanded = false;
+  renderInputStep();
 }
 
 function buildHourLabels(windowStart, windowEnd) {
@@ -197,31 +288,8 @@ function renderTimeBar(window, range, rangeId) {
 
 function renderInputStep() {
   const { year, month } = monthConfig;
-  const days = getDaysInMonth(year, month);
-  const firstWd = getWeekday(year, month, 1);
-
-  let calHtml = '<div class="cal-header">';
-  for (const wd of WEEKDAYS) calHtml += `<div class="cal-wd">${wd}</div>`;
-  calHtml += '</div><div class="cal-grid">';
-  for (let i = 0; i < firstWd; i++) calHtml += '<div class="cal-cell empty"></div>';
-
-  for (let d = 1; d <= days; d++) {
-    const dk = formatDateKey(year, month, d);
-    const wd = getWeekday(year, month, d);
-    const hasSlots = (monthConfig.days[dk] || []).length > 0;
-    const selectedCount = (requests[dk] || []).length;
-    let statusHtml = !hasSlots
-      ? '<span class="day-status none">募集なし</span>'
-      : selectedCount > 0
-        ? `<span class="day-status picked">${selectedCount}件登録</span>`
-        : dk === selectedDateKey
-          ? '<span class="day-status editing">編集中</span>'
-          : '<span class="day-status open">選択可</span>';
-
-    const classes = ['cal-cell', wd === 0 ? 'sun' : '', wd === 6 ? 'sat' : '', hasSlots ? 'has-slots' : 'no-slots', dk === selectedDateKey ? 'active' : ''].filter(Boolean).join(' ');
-    calHtml += `<button type="button" class="${classes}" data-date="${dk}" ${hasSlots ? '' : 'disabled'}><div class="cal-day-num">${d}</div>${statusHtml}</button>`;
-  }
-  calHtml += '</div>';
+  const stacked = isMobileLayout() ? ' stacked' : '';
+  const compact = useCompactCalendar() ? ' compact-cal' : '';
 
   app.innerHTML = `
     <div class="input-container">
@@ -234,8 +302,8 @@ function renderInputStep() {
         <span>登録中: <strong id="selected-count">${countSelected()}</strong> 件</span>
         <button type="button" class="btn btn-primary" id="btn-submit">希望を送信</button>
       </div>
-      <div class="input-layout">
-        <div class="calendar-wrap card"><h2 class="section-title">日付を選択</h2>${calHtml}</div>
+      <div class="input-layout${stacked}${compact}">
+        <div class="calendar-wrap card">${renderCalendarHtml()}</div>
         <div class="day-panel card" id="day-panel">${renderDayPanel()}</div>
       </div>
       <div class="selection-summary card" id="selection-summary">${renderSelectionSummary()}</div>
@@ -246,15 +314,27 @@ function renderInputStep() {
     btn.addEventListener('click', () => {
       selectedDateKey = btn.dataset.date;
       loadDraftForDay(selectedDateKey);
+      if (isMobileLayout()) calendarExpanded = false;
       renderInputStep();
-      scrollDayPanelIntoView();
     });
   });
+  const showMonth = document.getElementById('btn-show-month');
+  if (showMonth) {
+    showMonth.addEventListener('click', () => {
+      calendarExpanded = true;
+      renderInputStep();
+    });
+  }
+  const prevWeek = document.getElementById('btn-prev-week');
+  const nextWeek = document.getElementById('btn-next-week');
+  if (prevWeek) prevWeek.addEventListener('click', () => moveCompactWeek(-1));
+  if (nextWeek) nextWeek.addEventListener('click', () => moveCompactWeek(1));
   bindDayPanelEvents();
   document.getElementById('btn-back').addEventListener('click', () => {
     step = 'name';
     selectedDateKey = null;
     draftRanges = [];
+    calendarExpanded = false;
     render();
   });
   document.getElementById('btn-submit').addEventListener('click', submitRequests);
@@ -262,7 +342,7 @@ function renderInputStep() {
 
 function renderDayPanel() {
   if (!selectedDateKey) {
-    return `<h2 class="section-title">時間帯を選択</h2><p class="muted panel-empty">カレンダーから日付を選ぶと、その日の時間枠が表示されます。</p>`;
+    return `<p class="muted panel-empty">日付を選ぶと、すぐ下に時間帯が出ます。</p>`;
   }
 
   const windows = getWindowsForDay(selectedDateKey);
@@ -270,7 +350,7 @@ function renderDayPanel() {
   const wd = WEEKDAYS[getWeekday(Number(y), Number(m), Number(d))];
 
   if (windows.length === 0) {
-    return `<h2 class="section-title">${Number(m)}月${Number(d)}日（${wd}）</h2><p class="muted panel-empty">この日はシフトの募集がありません。</p>`;
+    return `<h2 class="section-title">${Number(m)}/${Number(d)}（${wd}）</h2><p class="muted panel-empty">この日はシフトの募集がありません。</p>`;
   }
 
   const windowHtml = windows.map((window) => {
@@ -300,8 +380,10 @@ function renderDayPanel() {
   const confirmLabel = alreadyRegistered ? 'シフト希望を更新する' : 'シフト希望を出す';
 
   return `
-    <h2 class="section-title">${Number(m)}月${Number(d)}日（${wd}）</h2>
-    <p class="panel-hint">時間を調整したあと、「${confirmLabel}」を押すとこの日の希望として登録されます。日付を選んだだけでは登録されません。</p>
+    <div class="day-selected-bar">
+      <h2 class="section-title">${Number(m)}月${Number(d)}日（${wd}）の時間帯</h2>
+    </div>
+    <p class="panel-hint">時間を合わせたら「${confirmLabel}」を押してください。</p>
     <div class="window-list">${windowHtml}</div>
     <div class="day-confirm">
       <button type="button" class="btn btn-primary" id="btn-confirm-day">${confirmLabel}</button>
@@ -470,7 +552,7 @@ function refreshSummaryUI() {
     const n = (requests[dk] || []).length;
     const statusEl = btn.querySelector('.day-status');
     if (!statusEl) return;
-    if (n > 0) { statusEl.className = 'day-status picked'; statusEl.textContent = `${n}件登録`; }
+    if (n > 0) { statusEl.className = 'day-status picked'; statusEl.textContent = `${n}件`; }
     else if (dk === selectedDateKey) { statusEl.className = 'day-status editing'; statusEl.textContent = '編集中'; }
     else { statusEl.className = 'day-status open'; statusEl.textContent = '選択可'; }
   });
